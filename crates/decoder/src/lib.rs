@@ -1,14 +1,44 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use alloy::primitives::{Address, U256, keccak256, B256};
+use alloy::rpc::types::Log;
+
+
+#[derive(Debug)]
+pub struct Erc20TransferEvent {
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+// pub fn transfer_event_signature() -> [u8; 32] {
+//     keccak256("Transfer(address,address,uint256)").into()
+// }
+
+
+pub fn erc20_transfer_event_signature() -> B256 { 
+    keccak256("Transfer(address,address,uint256)")
+}
+
+pub fn decode_erc20_transfer(log: &Log) -> Option<Erc20TransferEvent> {
+
+    if log.topics().len() < 3 {
+        return None;
     }
+
+    let signature = erc20_transfer_event_signature();
+    if log.topics()[0] != signature {
+        return None;
+    }
+
+    let from = Address::from_slice(&log.topics()[1].0[12..]);
+    let to = Address::from_slice(&log.topics()[2].0[12..]);
+
+    let value = U256::from_be_slice(&log.data().data);
+
+    Some(Erc20TransferEvent { from, to, value })
+
 }
+
+
+
+

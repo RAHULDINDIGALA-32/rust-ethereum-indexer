@@ -1045,6 +1045,9 @@ dependencies = [
 [[package]]
 name = "decoder"
 version = "0.1.0"
+dependencies = [
+ "alloy",
+]
 
 [[package]]
 name = "der"
@@ -1781,6 +1784,7 @@ name = "indexer"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "decoder",
  "rpc",
  "tokio",
 ]
