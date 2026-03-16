@@ -13,8 +13,8 @@ CREATE TABLE erc20_transfers (
 
     timestamp BIGINT NOT NULL,
     
-    PRIMARY KEY (txn_hash, log_index)
-    
+    PRIMARY KEY (txn_hash, log_index, block_number)
+
 ) PARTITION BY RANGE (block_number);
 
 
