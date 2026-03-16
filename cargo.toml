@@ -9,10 +9,10 @@ members = [
     "indexer",
 ]
 
-[workspace.depenndencies]
+[workspace.dependencies]
 
 tokio = {version = "1.0", features = ["full"] }
-alloy = "0.7"
+alloy = {version = "0.7", features = ["providers", "transports", "rpc", "rpc-types"] }
 sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "macros"] }
 async-graphql = "7"
 axum = "0.7"
