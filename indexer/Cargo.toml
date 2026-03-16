@@ -9,4 +9,5 @@ tokio = {workspace = true}
 alloy = {workspace = true}
 rpc = {path = "../crates/rpc"}
 decoder = {path = "../crates/decoder"}
+storage = {path = "../crates/storage"}
 

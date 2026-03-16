@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+tokio = {workspace = true}
+sqlx = {workspace = true}
+serde = {workspace = true}
+alloy = {workspace = true}
+
+models = {path = "./models"}
