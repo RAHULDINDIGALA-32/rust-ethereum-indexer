@@ -6,10 +6,12 @@ use sqlx::{Pool, Postgres, QueryBuilder, postgres::PgPoolOptions};
 
 pub type PgPool = Pool<Postgres>;
 
+const MAX_POOL_SIZE: u32 = 10;
+
 pub async fn create_db_pool(database_url: &str) -> PgPool {
 
     PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(MAX_POOL_SIZE)
         .connect(database_url)
         .await
         .expect("Failed to connect to database.")

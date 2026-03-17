@@ -34,7 +34,7 @@ impl BackfillEngine {
         //     println!("Indexing Blocks: {} -> {}", current_block, end_block);
 
         //     let logs = self.rpc_client
-        //         .fetch_logs(current_block, end_block)
+        //         .fetch_erc20_transfer_logs(current_block, end_block)
         //         .await?;
 
         //     println!("Fetched {} logs", logs.len());
@@ -108,7 +108,7 @@ impl BackfillEngine {
         start_block: u64,
         end_block: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let logs = self.rpc_client.fetch_logs(start_block, end_block).await?;
+        let logs = self.rpc_client.fetch_erc20_transfer_logs(start_block, end_block).await?;
 
         let mut records_batch: Vec<Erc20TransferRecord> = Vec::new();
 
