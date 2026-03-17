@@ -1916,7 +1916,9 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "decoder",
+ "ingestion",
  "rpc",
+ "storage",
  "tokio",
 ]
 
@@ -1935,6 +1937,11 @@ dependencies = [
 [[package]]
 name = "ingestion"
 version = "0.1.0"
+dependencies = [
+ "decoder",
+ "rpc",
+ "storage",
+]
 
 [[package]]
 name = "ipnet"

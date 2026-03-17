@@ -25,11 +25,9 @@ impl RpcClient {
         &self,
         from_block: u64,
         to_block: u64,
-        contract: Address,
     ) -> Result<Vec<Log>, Box<dyn std::error::Error>> {
 
         let filter = Filter::new()
-            .address(contract)
             .from_block(from_block)
             .to_block(to_block);
 
