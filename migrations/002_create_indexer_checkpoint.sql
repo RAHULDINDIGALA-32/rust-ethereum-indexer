@@ -1,0 +1,4 @@
+CREATE TABLE indexer_checkpoint (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY_KEY,
+last_processed_block BIGINT NOT NULL
+);
