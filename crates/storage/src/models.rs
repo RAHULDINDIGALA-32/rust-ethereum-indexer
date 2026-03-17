@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use bigdecimal::BigDecimal;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Erc20TransferRecord {
@@ -12,7 +13,7 @@ pub struct Erc20TransferRecord {
     pub contract_address: Vec<u8>,
     pub from_address: Vec<u8>,
     pub to_address: Vec<u8>,
-    pub value: String,
+    pub value: BigDecimal,
 
     pub timestamp: i64,
 }

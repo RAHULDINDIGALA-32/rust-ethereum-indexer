@@ -1,15 +1,16 @@
+use bigdecimal::BigDecimal;
+use std::str::FromStr;
 use rpc::RpcClient;
-use decoder::{Erc20TransferEvent, decode_erc20_transfer};
-use stoarge::{PgPool, insert_erc20_transfer};
-use storage::models::Erc20TransferRecord;
+use decoder::{decode_erc20_transfer};
+use storage::{Erc20TransferRecord, PgPool, insert_erc20_transfer};
 
-pun struct BackfillEngine {
+pub struct BackfillEngine {
     pub rpc_client: RpcClient,
     pub db_pool: PgPool,
     pub contract_address: Vec<u8>,
-};
+}
 
-const BLOCK_BATCH_SIZE: u64 = 10; // Number of blocks to process in each batch (currently limited to 10 as alchemy free tier supports only 10 block range)
+const BLOCK_BATCH_SIZE: u64 = 9; // Number of blocks to process in each batch (currently limited to 10 as alchemy free tier supports only 10 block range)
 
 impl BackfillEngine {
 
@@ -29,30 +30,32 @@ impl BackfillEngine {
 
             let logs = self.rpc_client
                 .fetch_logs(current_block, end_block)
-                .await:;
+                .await?;
 
             println!("Fetched {} logs", logs.len());
 
             for log in logs {
 
+                let log_block_timestamp =  self.rpc_client.get_block_timestamp(log.block_number.unwrap() as u64).await?;
+
                 if let Some(erc20_transfer_event) = decode_erc20_transfer(&log) {
 
                     let row = Erc20TransferRecord {
-                        block_number: log.block_number().unwrap().as_u64() as i64,
-                        block_hash: log.block_hash().unwrap().to_vec(),
+                        block_number: log.block_number.unwrap() as i64,
+                        block_hash: log.block_hash.unwrap().to_vec(),
 
-                        transaction_hash: log.transaction_hash().unwrap().to_vec(),\
-                        log_index: log.log_index().unwrap().as_u64() as i32,
+                        txn_hash: log.transaction_hash.unwrap().to_vec(),
+                        log_index: log.log_index.unwrap() as i32,
 
                         contract_address: log.address().to_vec(),
                         from_address: erc20_transfer_event.from.to_vec(),
                         to_address: erc20_transfer_event.to.to_vec(),
-                        value: erc20_transfer_event.value.to_string(),
+                        value: BigDecimal::from_str(&erc20_transfer_event.value.to_string()).unwrap(),
 
-                        timestamp: 0 
+                        timestamp: log_block_timestamp.unwrap() as i64,
                     };
 
-                insert_erc20_transfer(&self.db_pool, row).await?;
+                    insert_erc20_transfer(&self.db_pool, &row).await?;
 
                 }
             }
@@ -63,6 +66,4 @@ impl BackfillEngine {
         Ok(())
     }
 }
-
-
 

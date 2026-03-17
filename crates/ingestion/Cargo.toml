@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 
+bigdecimal = {workspace = true}
 rpc = { path = "../rpc" }
 decoder = { path = "../decoder" }
 storage = { path = "../storage" }

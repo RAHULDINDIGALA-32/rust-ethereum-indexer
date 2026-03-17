@@ -826,6 +826,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bigdecimal"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6773ddc0eafc0e509fb60e48dff7f450f8e674a0686ae8605e8d9901bd5eefa"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1916,6 +1928,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "decoder",
+ "dotenvy",
  "ingestion",
  "rpc",
  "storage",
@@ -1938,6 +1951,7 @@ dependencies = [
 name = "ingestion"
 version = "0.1.0"
 dependencies = [
+ "bigdecimal",
  "decoder",
  "rpc",
  "storage",
@@ -3184,6 +3198,7 @@ checksum = "24ba59a9342a3d9bab6c56c118be528b27c9b60e490080e9711a04dccac83ef6"
 dependencies = [
  "ahash",
  "atoi",
+ "bigdecimal",
  "byteorder",
  "bytes",
  "crc",
@@ -3262,6 +3277,7 @@ checksum = "1ed31390216d20e538e447a7a9b959e06ed9fc51c37b514b46eb758016ecd418"
 dependencies = [
  "atoi",
  "base64 0.21.7",
+ "bigdecimal",
  "bitflags",
  "byteorder",
  "bytes",
@@ -3304,6 +3320,7 @@ checksum = "7c824eb80b894f926f89a0b9da0c7f435d27cdd35b8c655b114e58223918577e"
 dependencies = [
  "atoi",
  "base64 0.21.7",
+ "bigdecimal",
  "bitflags",
  "byteorder",
  "crc",
@@ -3321,6 +3338,7 @@ dependencies = [
  "log",
  "md-5",
  "memchr",
+ "num-bigint",
  "once_cell",
  "rand 0.8.5",
  "serde",
@@ -3374,6 +3392,7 @@ name = "storage"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "bigdecimal",
  "serde",
  "sqlx",
  "tokio",

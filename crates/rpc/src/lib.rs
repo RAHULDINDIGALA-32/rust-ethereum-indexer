@@ -1,6 +1,6 @@
 use alloy::providers::{Provider, ProviderBuilder, RootProvider};
-use alloy::rpc::types::{Filter, Log};
-use alloy::primitives::{Address};
+use alloy::rpc::types::{Filter, Log, BlockNumberOrTag, BlockTransactionsKind};
+//use alloy::primitives::{Address};
 use alloy::transports::http::{Http, Client};
 
 use std::sync::Arc;
@@ -35,4 +35,24 @@ impl RpcClient {
 
         Ok(logs)
     }
+
+    pub async fn get_latest_block_number(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        Ok(self.provider.get_block_number().await?)
+    }
+
+    pub async fn get_block_timestamp(
+        &self,
+        block_number: u64,
+    ) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+
+        let block = self.provider
+            .get_block_by_number(
+                BlockNumberOrTag::Number(block_number.into()),
+                BlockTransactionsKind::Hashes,
+        ).await?;
+
+        Ok(block.map(|b| b.header.timestamp))
+    }
+
+   
 }

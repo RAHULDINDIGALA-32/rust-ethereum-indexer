@@ -1,5 +1,8 @@
+mod models;
+pub use models::Erc20TransferRecord;
+
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-use crate::models::Erc20TransferRecord;
+//use crate::models::Erc20TransferRecord;
 
 pub type PgPool = Pool<Postgres>;
 
