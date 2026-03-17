@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 
+tokio = {workspace = true}
+futures = {workspace = true}
 bigdecimal = {workspace = true}
 rpc = { path = "../rpc" }
 decoder = { path = "../decoder" }

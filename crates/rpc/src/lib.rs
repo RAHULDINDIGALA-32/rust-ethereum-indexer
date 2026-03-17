@@ -25,7 +25,7 @@ impl RpcClient {
         &self,
         from_block: u64,
         to_block: u64,
-    ) -> Result<Vec<Log>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Log>, Box<dyn std::error::Error + Send + Sync>> {
 
         let filter = Filter::new()
             .from_block(from_block)
@@ -36,14 +36,14 @@ impl RpcClient {
         Ok(logs)
     }
 
-    pub async fn get_latest_block_number(&self) -> Result<u64, Box<dyn std::error::Error>> {
+    pub async fn get_latest_block_number(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.provider.get_block_number().await?)
     }
 
     pub async fn get_block_timestamp(
         &self,
         block_number: u64,
-    ) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
 
         let block = self.provider
             .get_block_by_number(

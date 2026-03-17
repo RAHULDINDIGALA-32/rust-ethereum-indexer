@@ -1953,8 +1953,10 @@ version = "0.1.0"
 dependencies = [
  "bigdecimal",
  "decoder",
+ "futures",
  "rpc",
  "storage",
+ "tokio",
 ]
 
 [[package]]

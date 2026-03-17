@@ -1,4 +1,5 @@
 use rpc::RpcClient;
+use std::sync::Arc;
 use storage::create_db_pool;
 use ingestion::BackfillEngine;
 
@@ -27,11 +28,11 @@ async fn main() {
         .await
         .expect("Failed to fetch latest block number");
 
-    let backfill_engine = BackfillEngine {
+    let backfill_engine = Arc::new(BackfillEngine {
         rpc_client,
         db_pool,
         contract_address: vec![],
-    };
+    });
 
     backfill_engine.run(start_block, latest_block).await.unwrap();
 }
