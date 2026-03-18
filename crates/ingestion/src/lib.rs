@@ -1,12 +1,18 @@
 use bigdecimal::BigDecimal;
 use decoder::decode_erc20_transfer;
+use storage::{Erc20TransferRecord, PgPool, insert_batch_erc20_transfers, get_checkpoint, update_checkpoint};
 use futures::future::join_all;
-use std::sync::Arc;
 use rpc::RpcClient;
 use std::str::FromStr;
-use storage::{Erc20TransferRecord, PgPool, insert_batch_erc20_transfers};
+use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::sync::Mutex;
 //use tokio::task;
 use tokio;
+
+pub struct ProgressTracker {
+    completed_ranges: Mutex<BTreeSet<u64>>,
+}
 
 pub struct BackfillEngine {
     pub rpc_client: RpcClient,
@@ -80,27 +86,93 @@ impl BackfillEngine {
         //     current_block = end_block + 1;
         // }
 
+        let last_checkpoint = get_checkpoint(&self.db_pool).await? as u64;
+
+        let start_block = if last_checkpoint > start_block {
+            last_checkpoint
+        } else {
+            start_block
+        };
+
+        println!("Indexing resumed from block: {}", start_block);
+
+        let tracker = Arc::new(ProgressTracker {
+            completed_ranges: Mutex::new(BTreeSet::new()),
+        });
+
+        let checkpoint_state = Arc::new(tokio::sync::Mutex::new(last_checkpoint));
+
 
         let semaphore = Arc::new(tokio::sync::Semaphore::new(5)); // Limit concurrent tasks
 
-       let tasks: Vec<_> = (start_block..=latest_block)
-            .step_by(BLOCK_BATCH_SIZE as usize)
-            .map(|start| {
-                let end = std::cmp::min(start + BLOCK_BATCH_SIZE, latest_block);
-                let backfill_engine = Arc::clone(&self);
+        let mut tasks = Vec::new();
 
-                tokio::spawn({
-                    let value = semaphore.clone();
-                    async move { 
-                    let _permit = value.clone().acquire_owned().await.unwrap();
-                    backfill_engine.process_range(start, end).await }
-                })
-            })
-            .collect();
+        for start in (start_block..latest_block).step_by(BLOCK_BATCH_SIZE as usize) {
 
-        join_all(tasks).await;
+            let end = std::cmp::min(start + BLOCK_BATCH_SIZE, latest_block);
 
-        Ok(())
+            let backfill_engine= Arc::clone(&self);
+            let tracker_clone = Arc::clone(&tracker);
+            let checkpoint_clone = Arc::clone(&checkpoint_state);
+            let semaphore_clone = semaphore.clone();
+
+            let task = tokio::spawn(async move {
+                let _permit = semaphore_clone.acquire_owned().await.unwrap();
+
+                backfill_engine.process_range(start, end).await?;
+
+                // mark range complete
+                {
+                    let mut completed = tracker_clone.completed_ranges.lock().unwrap();
+                    completed.insert(end);
+                }
+
+                // try advancing checkpoint
+                let mut checkpoint_guard = checkpoint_clone.lock().await;
+
+                let new_checkpoint = try_advance_checkpoint(&tracker_clone, *checkpoint_guard);
+            
+                if new_checkpoint > *checkpoint_guard {
+                    update_checkpoint(&backfill_engine.db_pool, new_checkpoint as u64).await?;
+
+                    println!("Checkpoint advanced to {}", new_checkpoint);
+
+                    *checkpoint_guard = new_checkpoint;
+                }
+
+                Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+            }) ;
+
+            tasks.push(task);
+        }
+
+        for result in join_all(tasks).await {
+            result??;
+        }
+
+
+        // let tasks: Vec<_> = (start_block..=latest_block)
+        //     .step_by(BLOCK_BATCH_SIZE as usize)
+        //     .map(|start| {
+        //         let end = std::cmp::min(start + BLOCK_BATCH_SIZE, latest_block);
+        //         let backfill_engine = Arc::clone(&self);
+
+        //         tokio::spawn({
+        //             let value = semaphore.clone();
+        //             async move {
+        //                 let _permit = value.clone().acquire_owned().await.unwrap();
+        //                 backfill_engine.process_range(start, end).await
+        //             }
+        //         })
+        //     })
+        //     .collect();
+
+        // //join_all(tasks).await;
+        // for result in join_all(tasks).await {
+        //     result??;
+        // }
+
+         Ok(())
     }
 
     pub async fn process_range(
@@ -108,7 +180,10 @@ impl BackfillEngine {
         start_block: u64,
         end_block: u64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let logs = self.rpc_client.fetch_erc20_transfer_logs(start_block, end_block).await?;
+        let logs = self
+            .rpc_client
+            .fetch_erc20_transfer_logs(start_block, end_block)
+            .await?;
 
         let mut records_batch: Vec<Erc20TransferRecord> = Vec::new();
 
@@ -152,4 +227,25 @@ impl BackfillEngine {
 
         Ok(())
     }
+}
+
+
+fn try_advance_checkpoint(
+    tracker: &ProgressTracker,
+    mut current_checkpoint: u64,
+) -> u64 {
+
+    let completed = tracker.completed_ranges.lock().unwrap();
+
+    loop {
+        let next = current_checkpoint + BLOCK_BATCH_SIZE;
+
+        if completed.contains(&next) {
+            current_checkpoint = next;
+        } else {
+            break;
+        }
+    }
+
+    current_checkpoint
 }

@@ -95,3 +95,37 @@ pub async fn insert_batch_erc20_transfers(
 
     Ok(())
 }
+
+
+pub async fn get_checkpoint(
+    db_pool: &PgPool,
+) -> Result<u64, sqlx::Error> {
+
+    let record = sqlx::query!(
+        "SELECT last_processed_block
+         FROM indexer_checkpoint
+         WHERE id = 1"
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(record.last_processed_block as u64)
+}
+
+
+pub async fn update_checkpoint(
+    db_pool: &PgPool,
+    last_processed_block: u64
+) -> Result<(), sqlx::Error> {
+
+    sqlx::query!(
+        "UPDATE indexer_checkpoint
+         SET last_processed_block = $1
+         WHERE id = 1",
+         last_processed_block as i64
+    )
+    .execute(db_pool)
+    .await?;
+    
+    Ok(())
+}
