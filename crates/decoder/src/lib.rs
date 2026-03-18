@@ -1,6 +1,5 @@
-use alloy::primitives::{Address, U256, keccak256, B256};
+use alloy::primitives::{Address, B256, U256, keccak256};
 use alloy::rpc::types::Log;
-
 
 #[derive(Debug)]
 pub struct Erc20TransferEvent {
@@ -9,18 +8,15 @@ pub struct Erc20TransferEvent {
     pub value: U256,
 }
 
-
 // pub fn transfer_event_signature() -> [u8; 32] {
 //     keccak256("Transfer(address,address,uint256)").into()
 // }
 
-
-pub fn erc20_transfer_event_signature() -> B256 { 
+pub fn erc20_transfer_event_signature() -> B256 {
     keccak256("Transfer(address,address,uint256)")
 }
 
 pub fn decode_erc20_transfer(log: &Log) -> Option<Erc20TransferEvent> {
-
     if log.topics().len() < 3 {
         return None;
     }
@@ -36,9 +32,4 @@ pub fn decode_erc20_transfer(log: &Log) -> Option<Erc20TransferEvent> {
     let value = U256::from_be_slice(&log.data().data);
 
     Some(Erc20TransferEvent { from, to, value })
-
 }
-
-
-
-

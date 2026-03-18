@@ -1931,6 +1931,7 @@ dependencies = [
  "dotenvy",
  "ingestion",
  "rpc",
+ "sqlx",
  "storage",
  "tokio",
 ]

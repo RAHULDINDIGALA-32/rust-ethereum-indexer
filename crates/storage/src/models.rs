@@ -1,9 +1,8 @@
-use serde::{Serialize, Deserialize};
 use bigdecimal::BigDecimal;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Erc20TransferRecord {
-
     pub block_number: i64,
     pub block_hash: Vec<u8>,
 
