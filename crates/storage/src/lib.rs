@@ -66,6 +66,7 @@ pub async fn insert_batch_erc20_transfers(
         .map(|record| record.block_number)
         .min()
         .unwrap();
+
     let max_block = transfer_records
         .iter()
         .map(|record| record.block_number)
