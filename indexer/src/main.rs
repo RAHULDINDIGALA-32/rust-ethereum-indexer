@@ -3,6 +3,7 @@ use rpc::RpcClient;
 use sqlx::migrate::Migrator;
 use std::sync::Arc;
 use storage::create_db_pool;
+use api::start_server;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../migrations");
 
@@ -52,4 +53,6 @@ async fn main() {
     });
 
     backfill_engine.run(start_block).await.unwrap();
+
+    start_server(db_pool).await;
 }
