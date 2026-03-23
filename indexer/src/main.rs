@@ -1,14 +1,14 @@
+use api::start_server;
 use ingestion::BackfillEngine;
 use rpc::RpcClient;
 use sqlx::migrate::Migrator;
 use std::sync::Arc;
 use storage::create_db_pool;
-use api::start_server;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../migrations");
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenvy::dotenv().ok();
 
     let rpc_url = std::env::var("SEPOLIA_RPC_URL").expect("RPC_URL env-var not set!");
@@ -29,7 +29,7 @@ async fn main() {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(24);
-    
+
     let live_poll_interval_secs = std::env::var("LIVE_POLL_INTERVAL_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -45,14 +45,17 @@ async fn main() {
 
     let backfill_engine = Arc::new(BackfillEngine {
         rpc_client,
-        db_pool,
+        db_pool: db_pool.clone(),
         contract_address: vec![],
         confirmation_depth,
         reorg_lookback,
         live_poll_interval_secs,
     });
 
-    backfill_engine.run(start_block).await.unwrap();
+    tokio::try_join!(
+        Arc::clone(&backfill_engine).run(start_block),
+        start_server(db_pool)
+    )?;
 
-    start_server(db_pool).await;
+    Ok(())
 }

@@ -13,3 +13,4 @@ rpc = {path = "../crates/rpc"}
 decoder = {path = "../crates/decoder"}
 storage = {path = "../crates/storage"}
 ingestion = {path = "../crates/ingestion"}
+api = {path = "../crates/api"}

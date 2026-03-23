@@ -7,9 +7,9 @@ edition = "2024"
 
 async-graphql = {workspace = true}
 async-graphql-axum = "7"
-
+alloy = {workspace = true}
 axum = {workspace = true}
 tokio = {workspace = true}
 sqlx = {workspace = true}
 serde = {workspace = true}
-
+storage = {path = "../storage"}
