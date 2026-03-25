@@ -32,6 +32,18 @@ pub async fn get_checkpoint(db_pool: &PgPool) -> Result<u64, sqlx::Error> {
     Ok(record as u64)
 }
 
+pub async fn get_live_checkpoint(db_pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let record = sqlx::query_scalar::<_, i64>(
+        "SELECT last_processed_block
+         FROM live_indexer_checkpoint
+         WHERE id = 1",
+    )
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(record as u64)
+}
+
 pub async fn get_block_hash(
     db_pool: &PgPool,
     block_number: u64,
@@ -117,11 +129,13 @@ pub async fn commit_hot_range(
     db_pool: &PgPool,
     transfer_records: &[Erc20TransferRecord],
     indexed_blocks: &[(u64, Vec<u8>)],
+    checkpoint: u64,
 ) -> Result<(), sqlx::Error> {
     let mut tx = db_pool.begin().await?;
 
     insert_transfers_into_tx(&mut tx, HOT_TRANSFERS_TABLE, transfer_records).await?;
     insert_blocks_into_tx(&mut tx, HOT_BLOCKS_TABLE, indexed_blocks).await?;
+    update_live_checkpoint_tx(&mut tx, checkpoint).await?;
 
     tx.commit().await?;
     Ok(())
@@ -139,6 +153,7 @@ pub async fn rollback_from_block(db_pool: &PgPool, block_number: u64) -> Result<
     .await?;
     delete_range_from_lane_tx(&mut tx, HOT_TRANSFERS_TABLE, HOT_BLOCKS_TABLE, block_number).await?;
     update_checkpoint_tx(&mut tx, block_number.saturating_sub(1)).await?;
+    update_live_checkpoint_tx(&mut tx, block_number.saturating_sub(1)).await?;
 
     tx.commit().await?;
     Ok(())
@@ -150,6 +165,33 @@ pub async fn rollback_hot_from_block(
 ) -> Result<(), sqlx::Error> {
     let mut tx = db_pool.begin().await?;
     delete_range_from_lane_tx(&mut tx, HOT_TRANSFERS_TABLE, HOT_BLOCKS_TABLE, block_number).await?;
+    update_live_checkpoint_tx(&mut tx, block_number.saturating_sub(1)).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn prune_hot_before_block(
+    db_pool: &PgPool,
+    before_block: u64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = db_pool.begin().await?;
+
+    sqlx::query(
+        "DELETE FROM hot_erc20_transfers
+         WHERE block_number < $1",
+    )
+    .bind(before_block as i64)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM hot_indexed_blocks
+         WHERE block_number < $1",
+    )
+    .bind(before_block as i64)
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
     Ok(())
 }
@@ -179,6 +221,22 @@ async fn update_checkpoint_tx(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE indexer_checkpoint
+         SET last_processed_block = $1
+         WHERE id = 1",
+    )
+    .bind(checkpoint as i64)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn update_live_checkpoint_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    checkpoint: u64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE live_indexer_checkpoint
          SET last_processed_block = $1
          WHERE id = 1",
     )
