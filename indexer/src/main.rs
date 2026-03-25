@@ -1,3 +1,4 @@
+use alloy::primitives::Address;
 use api::start_server;
 use ingestion::BackfillEngine;
 use rpc::RpcClient;
@@ -34,6 +35,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(5);
+    let hot_window_size = std::env::var("HOT_WINDOW_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(64);
+    let contract_address = std::env::var("CONTRACT_ADDRESS")
+        .ok()
+        .map(|value| value.parse::<Address>())
+        .transpose()?
+        .map(|address| address.as_slice().to_vec())
+        .unwrap_or_default();
 
     let rpc_client = RpcClient::new(&rpc_url).await;
     let db_pool = create_db_pool(&db_url).await;
@@ -46,9 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let backfill_engine = Arc::new(BackfillEngine {
         rpc_client,
         db_pool: db_pool.clone(),
-        contract_address: vec![],
+        contract_address,
         confirmation_depth,
         reorg_lookback,
+        hot_window_size,
         live_poll_interval_secs,
     });
 

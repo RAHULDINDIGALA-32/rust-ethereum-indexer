@@ -1,4 +1,4 @@
-use alloy::primitives::B256;
+use alloy::primitives::{Address, B256};
 use alloy::providers::{Provider, ProviderBuilder, RootProvider};
 use alloy::rpc::types::{BlockNumberOrTag, BlockTransactionsKind, Filter, Log};
 use alloy::transports::http::{Client, Http};
@@ -33,11 +33,16 @@ impl RpcClient {
         &self,
         from_block: u64,
         to_block: u64,
+        contract_address: Option<&[u8]>,
     ) -> Result<Vec<Log>, Box<dyn std::error::Error + Send + Sync>> {
-        let filter = Filter::new()
+        let mut filter = Filter::new()
             .event_signature(ERC20_TRANSFER_EVENT_SIGNATURE)
             .from_block(from_block)
             .to_block(to_block);
+
+        if let Some(contract_address) = contract_address {
+            filter = filter.address(Address::from_slice(contract_address));
+        }
 
         let logs = self.provider.get_logs(&filter).await?;
 
@@ -67,15 +72,5 @@ impl RpcClient {
             hash: block.header.hash.to_vec(),
             timestamp: block.header.timestamp,
         }))
-    }
-
-    pub async fn get_block_timestamp(
-        &self,
-        block_number: u64,
-    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self
-            .get_block_metadata(block_number)
-            .await?
-            .map(|block| block.timestamp))
     }
 }

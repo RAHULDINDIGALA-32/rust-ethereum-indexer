@@ -26,8 +26,11 @@ pub struct Erc20TransferEventRecord {
 #[graphql(rename_fields = "camelCase")]
 pub struct IndexerStatus {
     pub last_processed_block: i64,
-    pub latest_indexed_block: Option<i64>,
-    pub indexed_block_count: i64,
+    pub latest_finalized_block: Option<i64>,
+    pub latest_hot_block: Option<i64>,
+    pub latest_available_block: Option<i64>,
+    pub finalized_block_count: i64,
+    pub hot_block_count: i64,
 }
 
 #[derive(FromRow)]
@@ -87,7 +90,31 @@ impl QueryRoot {
                 to_address,
                 value::text AS value,
                 timestamp
-             FROM erc20_transfers",
+             FROM (
+                SELECT
+                    block_number,
+                    block_hash,
+                    txn_hash,
+                    log_index,
+                    contract_address,
+                    from_address,
+                    to_address,
+                    value,
+                    timestamp
+                FROM erc20_transfers
+                UNION ALL
+                SELECT
+                    block_number,
+                    block_hash,
+                    txn_hash,
+                    log_index,
+                    contract_address,
+                    from_address,
+                    to_address,
+                    value,
+                    timestamp
+                FROM hot_erc20_transfers
+             ) AS combined_transfers",
         );
 
         let has_filters = from_address.is_some()
@@ -146,22 +173,39 @@ impl QueryRoot {
         .fetch_one(db_pool)
         .await?;
 
-        let latest_indexed_block = sqlx::query_scalar::<_, Option<i64>>(
+        let latest_finalized_block = sqlx::query_scalar::<_, Option<i64>>(
             "SELECT MAX(block_number)
              FROM indexed_blocks",
         )
         .fetch_one(db_pool)
         .await?;
 
-        let indexed_block_count =
+        let latest_hot_block = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(block_number)
+             FROM hot_indexed_blocks",
+        )
+        .fetch_one(db_pool)
+        .await?;
+
+        let latest_available_block = latest_finalized_block.max(latest_hot_block);
+
+        let finalized_block_count =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM indexed_blocks")
+                .fetch_one(db_pool)
+                .await?;
+
+        let hot_block_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM hot_indexed_blocks")
                 .fetch_one(db_pool)
                 .await?;
 
         Ok(IndexerStatus {
             last_processed_block,
-            latest_indexed_block,
-            indexed_block_count,
+            latest_finalized_block,
+            latest_hot_block,
+            latest_available_block,
+            finalized_block_count,
+            hot_block_count,
         })
     }
 }

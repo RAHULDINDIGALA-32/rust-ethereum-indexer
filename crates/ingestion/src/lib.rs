@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use storage::{
-    Erc20TransferRecord, PgPool, get_block_hash, get_checkpoint, insert_batch_erc20_transfers,
-    insert_blocks, rollback_from_block, update_checkpoint,
+    Erc20TransferRecord, PgPool, commit_finalized_range, commit_hot_range, get_block_hash,
+    get_checkpoint, get_hot_block_hash, list_hot_block_numbers, list_hot_blocks,
+    rollback_from_block, rollback_hot_from_block,
 };
 use tokio::time::{Duration, sleep};
 
@@ -16,11 +17,16 @@ pub struct BackfillEngine {
     pub contract_address: Vec<u8>,
     pub confirmation_depth: u64,
     pub reorg_lookback: u64,
+    pub hot_window_size: u64,
     pub live_poll_interval_secs: u64,
 }
 
 const BLOCK_BATCH_SIZE: u64 = 10;
-const RECORD_BATCH_SIZE: usize = 100;
+
+struct RangePayload {
+    transfer_records: Vec<Erc20TransferRecord>,
+    indexed_blocks: Vec<(u64, Vec<u8>)>,
+}
 
 impl BackfillEngine {
     pub async fn run(
@@ -30,62 +36,251 @@ impl BackfillEngine {
         loop {
             let latest_block = self.rpc_client.get_latest_block_number().await?;
             let safe_head = latest_block.saturating_sub(self.confirmation_depth);
-            let checkpoint = get_checkpoint(&self.db_pool).await?;
+            let finalized_checkpoint = get_checkpoint(&self.db_pool).await?;
 
-            if checkpoint >= start_block
+            if finalized_checkpoint >= start_block
                 && self
-                    .reconcile_recent_history(start_block, checkpoint)
+                    .reconcile_finalized_history(start_block, finalized_checkpoint)
                     .await?
             {
                 continue;
             }
 
-            let checkpoint = get_checkpoint(&self.db_pool).await?;
-            let next_block = checkpoint.saturating_add(1).max(start_block);
-
-            if next_block > safe_head {
-                println!(
-                    "Checkpoint {} is at the current safe head {} (latest {}). Sleeping {}s.",
-                    checkpoint, safe_head, latest_block, self.live_poll_interval_secs
-                );
-
-                sleep(Duration::from_secs(self.live_poll_interval_secs)).await;
+            if self.reconcile_hot_history().await? {
                 continue;
             }
 
-            let end_block = std::cmp::min(next_block + BLOCK_BATCH_SIZE - 1, safe_head);
+            let mut made_progress = false;
 
-            println!(
-                "Indexing blocks {} -> {} (safe head {}, latest {})",
-                next_block, end_block, safe_head, latest_block
-            );
+            let finalized_checkpoint = get_checkpoint(&self.db_pool).await?;
+            let next_finalized_block = finalized_checkpoint.saturating_add(1).max(start_block);
 
-            if self.process_range(next_block, end_block).await? {
-                update_checkpoint(&self.db_pool, end_block).await?;
-                println!("Checkpoint advanced to {}", end_block);
+            if next_finalized_block <= safe_head {
+                let end_block =
+                    std::cmp::min(next_finalized_block + BLOCK_BATCH_SIZE - 1, safe_head);
+                println!(
+                    "Finalizing blocks {} -> {} (safe head {}, latest {})",
+                    next_finalized_block, end_block, safe_head, latest_block
+                );
+
+                if self
+                    .process_finalized_range(next_finalized_block, end_block)
+                    .await?
+                {
+                    made_progress = true;
+                }
+            }
+
+            let finalized_checkpoint = get_checkpoint(&self.db_pool).await?;
+            let hot_window_start = self
+                .compute_hot_window_start(start_block, latest_block)
+                .max(finalized_checkpoint.saturating_add(1));
+
+            if finalized_checkpoint.saturating_add(1)
+                >= self.compute_hot_window_start(start_block, latest_block)
+            {
+                if let Some(next_hot_block) = self
+                    .next_hot_block_to_index(hot_window_start, latest_block)
+                    .await?
+                {
+                    let end_block =
+                        std::cmp::min(next_hot_block + BLOCK_BATCH_SIZE - 1, latest_block);
+                    println!(
+                        "Indexing hot blocks {} -> {} (latest {})",
+                        next_hot_block, end_block, latest_block
+                    );
+
+                    if self.process_hot_range(next_hot_block, end_block).await? {
+                        made_progress = true;
+                    }
+                }
+            }
+
+            if !made_progress {
+                println!(
+                    "Finalized checkpoint {} is current; hot window is caught up through latest {}. Sleeping {}s.",
+                    finalized_checkpoint, latest_block, self.live_poll_interval_secs
+                );
+
+                sleep(Duration::from_secs(self.live_poll_interval_secs)).await;
             }
         }
     }
 
-    pub async fn process_range(
+    async fn process_finalized_range(
         &self,
         start_block: u64,
         end_block: u64,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let block_metadata = self
-            .fetch_block_metadata_range(start_block, end_block)
-            .await?;
+        let payload = self.build_range_payload(start_block, end_block).await?;
 
-        for block in &block_metadata {
-            if let Some(existing_hash) = get_block_hash(&self.db_pool, block.number).await? {
-                if existing_hash != block.hash {
-                    println!("Reorg detected at block {}", block.number);
-                    self.handle_reorg(block.number).await?;
+        for (block_number, block_hash) in &payload.indexed_blocks {
+            if let Some(existing_hash) = get_block_hash(&self.db_pool, *block_number).await? {
+                if existing_hash != *block_hash {
+                    println!("Finalized reorg detected at block {}", block_number);
+                    self.handle_finalized_reorg(*block_number).await?;
                     return Ok(false);
                 }
             }
         }
 
+        commit_finalized_range(
+            &self.db_pool,
+            &payload.transfer_records,
+            &payload.indexed_blocks,
+            start_block,
+            end_block,
+        )
+        .await?;
+
+        println!("Finalized checkpoint advanced to {}", end_block);
+        Ok(true)
+    }
+
+    async fn process_hot_range(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let payload = self.build_range_payload(start_block, end_block).await?;
+
+        for (block_number, block_hash) in &payload.indexed_blocks {
+            if let Some(existing_hash) = get_hot_block_hash(&self.db_pool, *block_number).await? {
+                if existing_hash != *block_hash {
+                    println!("Hot reorg detected at block {}", block_number);
+                    self.handle_hot_reorg(*block_number).await?;
+                    return Ok(false);
+                }
+            }
+        }
+
+        commit_hot_range(
+            &self.db_pool,
+            &payload.transfer_records,
+            &payload.indexed_blocks,
+        )
+        .await?;
+
+        Ok(true)
+    }
+
+    async fn handle_finalized_reorg(
+        &self,
+        block_number: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        println!(
+            "Rolling back finalized and hot state from block {}",
+            block_number
+        );
+        rollback_from_block(&self.db_pool, block_number).await?;
+        Ok(())
+    }
+
+    async fn handle_hot_reorg(
+        &self,
+        block_number: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        println!("Rolling back hot state from block {}", block_number);
+        rollback_hot_from_block(&self.db_pool, block_number).await?;
+        Ok(())
+    }
+
+    async fn reconcile_finalized_history(
+        &self,
+        start_block: u64,
+        checkpoint: u64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let lookback = self.reorg_lookback.max(self.confirmation_depth).max(1);
+        let validation_start = checkpoint
+            .saturating_sub(lookback.saturating_sub(1))
+            .max(start_block);
+
+        for block_number in validation_start..=checkpoint {
+            let chain_block = self.fetch_block_metadata(block_number).await?;
+
+            match get_block_hash(&self.db_pool, block_number).await? {
+                Some(stored_hash) if stored_hash != chain_block.hash => {
+                    println!(
+                        "Finalized reorg detected while revalidating block {}",
+                        block_number
+                    );
+                    self.handle_finalized_reorg(block_number).await?;
+                    return Ok(true);
+                }
+                Some(_) => {}
+                None => {
+                    println!(
+                        "Missing finalized block metadata for block {}. Rebuilding from there.",
+                        block_number
+                    );
+                    self.handle_finalized_reorg(block_number).await?;
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn reconcile_hot_history(
+        &self,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        for (block_number, stored_hash) in list_hot_blocks(&self.db_pool).await? {
+            let chain_block = self.fetch_block_metadata(block_number).await?;
+
+            if stored_hash != chain_block.hash {
+                println!(
+                    "Hot reorg detected while revalidating block {}",
+                    block_number
+                );
+                self.handle_hot_reorg(block_number).await?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn next_hot_block_to_index(
+        &self,
+        hot_window_start: u64,
+        latest_block: u64,
+    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
+        if hot_window_start > latest_block {
+            return Ok(None);
+        }
+
+        let stored_blocks =
+            list_hot_block_numbers(&self.db_pool, hot_window_start, latest_block).await?;
+
+        let mut expected_block = hot_window_start;
+        for block_number in stored_blocks {
+            if block_number < expected_block {
+                continue;
+            }
+
+            if block_number > expected_block {
+                return Ok(Some(expected_block));
+            }
+
+            expected_block = expected_block.saturating_add(1);
+        }
+
+        if expected_block <= latest_block {
+            Ok(Some(expected_block))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn build_range_payload(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> Result<RangePayload, Box<dyn std::error::Error + Send + Sync>> {
+        let block_metadata = self
+            .fetch_block_metadata_range(start_block, end_block)
+            .await?;
         let block_timestamps: HashMap<u64, i64> = block_metadata
             .iter()
             .map(|block| (block.number, block.timestamp as i64))
@@ -97,10 +292,18 @@ impl BackfillEngine {
 
         let logs = self
             .rpc_client
-            .fetch_erc20_transfer_logs(start_block, end_block)
+            .fetch_erc20_transfer_logs(
+                start_block,
+                end_block,
+                if self.contract_address.is_empty() {
+                    None
+                } else {
+                    Some(self.contract_address.as_slice())
+                },
+            )
             .await?;
 
-        let mut records_batch = Vec::new();
+        let mut transfer_records = Vec::new();
 
         for log in logs {
             let block_number = log
@@ -132,82 +335,19 @@ impl BackfillEngine {
                         .ok_or_else(|| missing_field_error("timestamp"))?,
                 };
 
-                records_batch.push(record);
-
-                if records_batch.len() >= RECORD_BATCH_SIZE {
-                    insert_batch_erc20_transfers(&self.db_pool, &records_batch).await?;
-                    records_batch.clear();
-                }
+                transfer_records.push(record);
             }
         }
 
-        if !records_batch.is_empty() {
-            insert_batch_erc20_transfers(&self.db_pool, &records_batch).await?;
-        }
-
-        let indexed_blocks: Vec<(u64, Vec<u8>)> = block_metadata
+        let indexed_blocks = block_metadata
             .into_iter()
             .map(|block| (block.number, block.hash))
             .collect();
 
-        insert_blocks(&self.db_pool, &indexed_blocks).await?;
-
-        Ok(true)
-    }
-
-    pub async fn handle_reorg(
-        &self,
-        block_number: u64,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        println!("Rolling back from block {}", block_number);
-
-        rollback_from_block(&self.db_pool, block_number).await?;
-        update_checkpoint(&self.db_pool, block_number.saturating_sub(1)).await?;
-
-        Ok(())
-    }
-
-    async fn reconcile_recent_history(
-        &self,
-        start_block: u64,
-        checkpoint: u64,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let lookback = self.reorg_lookback.max(self.confirmation_depth).max(1);
-        let validation_start = checkpoint
-            .saturating_sub(lookback.saturating_sub(1))
-            .max(start_block);
-
-        for block_number in validation_start..=checkpoint {
-            let chain_block = self
-                .rpc_client
-                .get_block_metadata(block_number)
-                .await?
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("Block {block_number} not found on the RPC provider"),
-                    )
-                })?;
-
-            match get_block_hash(&self.db_pool, block_number).await? {
-                Some(stored_hash) if stored_hash != chain_block.hash => {
-                    println!("Reorg detected while revalidating block {}", block_number);
-                    self.handle_reorg(block_number).await?;
-                    return Ok(true);
-                }
-                Some(_) => {}
-                None => {
-                    println!(
-                        "Missing block metadata for indexed block {}. Rebuilding recent history.",
-                        block_number
-                    );
-                    self.handle_reorg(block_number).await?;
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
+        Ok(RangePayload {
+            transfer_records,
+            indexed_blocks,
+        })
     }
 
     async fn fetch_block_metadata_range(
@@ -218,21 +358,33 @@ impl BackfillEngine {
         let mut block_metadata = Vec::with_capacity((end_block - start_block + 1) as usize);
 
         for block_number in start_block..=end_block {
-            let block = self
-                .rpc_client
-                .get_block_metadata(block_number)
-                .await?
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("Block {block_number} not found on the RPC provider"),
-                    )
-                })?;
-
-            block_metadata.push(block);
+            block_metadata.push(self.fetch_block_metadata(block_number).await?);
         }
 
         Ok(block_metadata)
+    }
+
+    async fn fetch_block_metadata(
+        &self,
+        block_number: u64,
+    ) -> Result<BlockMetadata, Box<dyn std::error::Error + Send + Sync>> {
+        self.rpc_client
+            .get_block_metadata(block_number)
+            .await?
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Block {block_number} not found on the RPC provider"),
+                )
+            })
+            .map_err(Into::into)
+    }
+
+    fn compute_hot_window_start(&self, start_block: u64, latest_block: u64) -> u64 {
+        let hot_window_size = self.hot_window_size.max(self.confirmation_depth + 1).max(1);
+        latest_block
+            .saturating_sub(hot_window_size.saturating_sub(1))
+            .max(start_block)
     }
 }
 
