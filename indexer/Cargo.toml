@@ -1,16 +1,17 @@
 [package]
 name = "indexer"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-
-tokio = {workspace = true}
-alloy = {workspace = true}
-dotenvy = {workspace = true}
-sqlx = {workspace = true}
-rpc = {path = "../crates/rpc"}
-decoder = {path = "../crates/decoder"}
-storage = {path = "../crates/storage"}
-ingestion = {path = "../crates/ingestion"}
-api = {path = "../crates/api"}
+alloy.workspace = true
+api.workspace = true
+decoder.workspace = true
+dotenvy.workspace = true
+ingestion.workspace = true
+rpc.workspace = true
+sqlx.workspace = true
+storage.workspace = true
+tokio.workspace = true

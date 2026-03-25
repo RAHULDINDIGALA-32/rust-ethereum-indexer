@@ -1,12 +1,12 @@
 [package]
 name = "rpc"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-
-tokio = {workspace = true}
-alloy = {workspace = true}
-serde = {workspace = true}
-serde_json = {workspace = true}
-
+alloy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

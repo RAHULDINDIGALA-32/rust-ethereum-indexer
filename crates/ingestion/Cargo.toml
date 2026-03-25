@@ -1,14 +1,14 @@
 [package]
 name = "ingestion"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-
-tokio = {workspace = true}
-futures = {workspace = true}
-bigdecimal = {workspace = true}
-rpc = { path = "../rpc" }
-decoder = { path = "../decoder" }
-storage = { path = "../storage" }
-
+bigdecimal.workspace = true
+decoder.workspace = true
+futures.workspace = true
+rpc.workspace = true
+storage.workspace = true
+tokio.workspace = true

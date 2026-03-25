@@ -1,15 +1,16 @@
 [package]
 name = "api"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-
-async-graphql = {workspace = true}
+alloy.workspace = true
+async-graphql.workspace = true
 async-graphql-axum = "7"
-alloy = {workspace = true}
-axum = {workspace = true}
-tokio = {workspace = true}
-sqlx = {workspace = true}
-serde = {workspace = true}
-storage = {path = "../storage"}
+axum.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+storage.workspace = true
+tokio.workspace = true

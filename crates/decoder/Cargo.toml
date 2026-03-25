@@ -1,8 +1,9 @@
 [package]
 name = "decoder"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-alloy = {workspace = true}
-
+alloy.workspace = true
