@@ -12,6 +12,14 @@ const HOT_TRANSFERS_TABLE: &str = "hot_erc20_transfers";
 const COLD_BLOCKS_TABLE: &str = "indexed_blocks";
 const HOT_BLOCKS_TABLE: &str = "hot_indexed_blocks";
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CommitStats {
+    pub attempted_transfers: u64,
+    pub inserted_transfers: u64,
+    pub duplicate_transfers: u64,
+    pub block_rows: u64,
+}
+
 pub async fn create_db_pool(database_url: &str) -> PgPool {
     PgPoolOptions::new()
         .max_connections(MAX_POOL_SIZE)
@@ -106,10 +114,11 @@ pub async fn commit_finalized_range(
     indexed_blocks: &[(u64, Vec<u8>)],
     start_block: u64,
     checkpoint: u64,
-) -> Result<(), sqlx::Error> {
+) -> Result<CommitStats, sqlx::Error> {
     let mut tx = db_pool.begin().await?;
 
-    insert_transfers_into_tx(&mut tx, COLD_TRANSFERS_TABLE, transfer_records).await?;
+    let inserted_transfers =
+        insert_transfers_into_tx(&mut tx, COLD_TRANSFERS_TABLE, transfer_records).await?;
     insert_blocks_into_tx(&mut tx, COLD_BLOCKS_TABLE, indexed_blocks).await?;
     delete_range_between_blocks_tx(
         &mut tx,
@@ -122,7 +131,14 @@ pub async fn commit_finalized_range(
     update_checkpoint_tx(&mut tx, checkpoint).await?;
 
     tx.commit().await?;
-    Ok(())
+    Ok(CommitStats {
+        attempted_transfers: transfer_records.len() as u64,
+        inserted_transfers,
+        duplicate_transfers: transfer_records
+            .len()
+            .saturating_sub(inserted_transfers as usize) as u64,
+        block_rows: indexed_blocks.len() as u64,
+    })
 }
 
 pub async fn commit_hot_range(
@@ -130,15 +146,23 @@ pub async fn commit_hot_range(
     transfer_records: &[Erc20TransferRecord],
     indexed_blocks: &[(u64, Vec<u8>)],
     checkpoint: u64,
-) -> Result<(), sqlx::Error> {
+) -> Result<CommitStats, sqlx::Error> {
     let mut tx = db_pool.begin().await?;
 
-    insert_transfers_into_tx(&mut tx, HOT_TRANSFERS_TABLE, transfer_records).await?;
+    let inserted_transfers =
+        insert_transfers_into_tx(&mut tx, HOT_TRANSFERS_TABLE, transfer_records).await?;
     insert_blocks_into_tx(&mut tx, HOT_BLOCKS_TABLE, indexed_blocks).await?;
     update_live_checkpoint_tx(&mut tx, checkpoint).await?;
 
     tx.commit().await?;
-    Ok(())
+    Ok(CommitStats {
+        attempted_transfers: transfer_records.len() as u64,
+        inserted_transfers,
+        duplicate_transfers: transfer_records
+            .len()
+            .saturating_sub(inserted_transfers as usize) as u64,
+        block_rows: indexed_blocks.len() as u64,
+    })
 }
 
 pub async fn rollback_from_block(db_pool: &PgPool, block_number: u64) -> Result<(), sqlx::Error> {
@@ -251,9 +275,9 @@ async fn insert_transfers_into_tx(
     tx: &mut Transaction<'_, Postgres>,
     table_name: &str,
     transfer_records: &[Erc20TransferRecord],
-) -> Result<(), sqlx::Error> {
+) -> Result<u64, sqlx::Error> {
     if transfer_records.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let min_block = transfer_records
@@ -297,9 +321,9 @@ async fn insert_transfers_into_tx(
     });
 
     query_builder.push(" ON CONFLICT (txn_hash, log_index, block_number) DO NOTHING");
-    query_builder.build().execute(&mut **tx).await?;
+    let result = query_builder.build().execute(&mut **tx).await?;
 
-    Ok(())
+    Ok(result.rows_affected())
 }
 
 async fn insert_blocks_into_tx(
